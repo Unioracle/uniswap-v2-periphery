@@ -14,7 +14,7 @@ import UniswapV1Exchange from '../../build/UniswapV1Exchange.json'
 import UniswapV1Factory from '../../build/UniswapV1Factory.json'
 import UniswapV2Router01 from '../../build/UniswapV2Router01.json'
 import UniswapV2Migrator from '../../build/UniswapV2Migrator.json'
-import UniswapV2Router02 from '../../build/UniswapV2Router02.json'
+import UniswapV2Router03 from '../../build/UniswapV2Router03.json'
 import RouterEventEmitter from '../../build/RouterEventEmitter.json'
 import ExampleSlidingWindowOracle from '../../build/ExampleSlidingWindowOracle.json'
 
@@ -31,7 +31,7 @@ interface V2Fixture {
   factoryV1: Contract
   factoryV2: Contract
   router01: Contract
-  router02: Contract
+  router03: Contract
   routerEventEmitter: Contract
   router: Contract
   migrator: Contract
@@ -62,7 +62,7 @@ export async function v2Fixture(provider: Web3Provider, [wallet]: Wallet[]): Pro
 
   // deploy routers
   const router01 = await deployContract(wallet, UniswapV2Router01, [factoryV2.address, WETH.address], overrides)
-  const router02 = await deployContract(wallet, UniswapV2Router02, [factoryV2.address, WETH.address, oracle.address], overrides)
+  const router03 = await deployContract(wallet, UniswapV2Router03, [factoryV2.address, WETH.address, oracle.address], overrides)
 
   // event emitter for testing
   const routerEventEmitter = await deployContract(wallet, RouterEventEmitter, [])
@@ -99,8 +99,8 @@ export async function v2Fixture(provider: Web3Provider, [wallet]: Wallet[]): Pro
     factoryV1,
     factoryV2,
     router01,
-    router02,
-    router: router02, // the default router, 01 had a minor bug
+    router03,
+    router: router03, // the default router, 01 had a minor bug
     routerEventEmitter,
     migrator,
     WETHExchangeV1,
