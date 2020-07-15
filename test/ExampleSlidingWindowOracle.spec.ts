@@ -31,6 +31,7 @@ describe('ExampleSlidingWindowOracle', () => {
   let pair: Contract
   let weth: Contract
   let factory: Contract
+  let uno: Contract
 
   async function addLiquidity(amount0: BigNumber = defaultToken0Amount, amount1: BigNumber = defaultToken1Amount) {
     if (!amount0.isZero()) await token0.transfer(pair.address, amount0)
@@ -52,7 +53,7 @@ describe('ExampleSlidingWindowOracle', () => {
   }
 
   function deployOracle(windowSize: number, granularity: number) {
-    return deployContract(wallet, ExampleSlidingWindowOracle, [factory.address, windowSize, granularity], overrides)
+    return deployContract(wallet, ExampleSlidingWindowOracle, [factory.address, windowSize, granularity, uno.address], overrides)
   }
 
   beforeEach('deploy fixture', async function() {
@@ -63,6 +64,7 @@ describe('ExampleSlidingWindowOracle', () => {
     pair = fixture.pair
     weth = fixture.WETH
     factory = fixture.factoryV2
+    uno = fixture.uno
   })
 
   // 1/1/2020 @ 12:00 am UTC
@@ -86,14 +88,17 @@ describe('ExampleSlidingWindowOracle', () => {
 
   it('computes the periodSize correctly', async () => {
     const oracle = await deployOracle(defaultWindowSize, defaultGranularity)
+    await uno.updateMinable(oracle.address, true)
     expect(await oracle.periodSize()).to.eq(3600)
     const oracleOther = await deployOracle(defaultWindowSize * 2, defaultGranularity / 2)
+    await uno.updateMinable(oracleOther.address, true)
     expect(await oracleOther.periodSize()).to.eq(3600 * 4)
   })
 
   describe('#observationIndexOf', () => {
     it('works for examples', async () => {
       const oracle = await deployOracle(defaultWindowSize, defaultGranularity)
+      await uno.updateMinable(oracle.address, true)
       expect(await oracle.observationIndexOf(0)).to.eq(0)
       expect(await oracle.observationIndexOf(3599)).to.eq(0)
       expect(await oracle.observationIndexOf(3600)).to.eq(1)
@@ -106,6 +111,7 @@ describe('ExampleSlidingWindowOracle', () => {
     })
     it('overflow safe', async () => {
       const oracle = await deployOracle(25500, 255) // 100 period size
+      await uno.updateMinable(oracle.address, true)
       expect(await oracle.observationIndexOf(0)).to.eq(0)
       expect(await oracle.observationIndexOf(99)).to.eq(0)
       expect(await oracle.observationIndexOf(100)).to.eq(1)
@@ -115,6 +121,7 @@ describe('ExampleSlidingWindowOracle', () => {
     })
     it('matches offline computation', async () => {
       const oracle = await deployOracle(defaultWindowSize, defaultGranularity)
+      await uno.updateMinable(oracle.address, true)
       for (let timestamp of [0, 5000, 1000, 25000, 86399, 86400, 86401]) {
         expect(await oracle.observationIndexOf(timestamp)).to.eq(observationIndexOf(timestamp))
       }
@@ -126,19 +133,22 @@ describe('ExampleSlidingWindowOracle', () => {
 
     beforeEach(
       'deploy oracle',
-      async () => (slidingWindowOracle = await deployOracle(defaultWindowSize, defaultGranularity))
+      async () => {
+        slidingWindowOracle = await deployOracle(defaultWindowSize, defaultGranularity)
+        await uno.updateMinable(slidingWindowOracle.address, true)
+      }
     )
 
     beforeEach('add default liquidity', () => addLiquidity())
 
     it('succeeds', async () => {
-      await slidingWindowOracle.update(token0.address, token1.address, overrides)
+      await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
     })
 
     it('sets the appropriate epoch slot', async () => {
       const blockTimestamp = (await pair.getReserves())[2]
       expect(blockTimestamp).to.eq(startTime)
-      await slidingWindowOracle.update(token0.address, token1.address, overrides)
+      await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
       expect(await slidingWindowOracle.pairObservations(pair.address, observationIndexOf(blockTimestamp))).to.deep.eq([
         bigNumberify(blockTimestamp),
         await pair.price0CumulativeLast(),
@@ -148,39 +158,39 @@ describe('ExampleSlidingWindowOracle', () => {
     // because the previous block timestamp may differ from the current block timestamp by 1 second
 
     it('gas for first update (allocates empty array)', async () => {
-      const tx = await slidingWindowOracle.update(token0.address, token1.address, overrides)
+      const tx = await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
       const receipt = await tx.wait()
-      expect(receipt.gasUsed).to.eq('116816')
+      expect(receipt.gasUsed).to.eq('177115')
     }).retries(2) // gas test inconsistent
 
     it('gas for second update in the same period (skips)', async () => {
-      await slidingWindowOracle.update(token0.address, token1.address, overrides)
-      const tx = await slidingWindowOracle.update(token0.address, token1.address, overrides)
+      await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
+      const tx = await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
       const receipt = await tx.wait()
-      expect(receipt.gasUsed).to.eq('25574')
+      expect(receipt.gasUsed).to.eq('25950')
     }).retries(2) // gas test inconsistent
 
     it('gas for second update different period (no allocate, no skip)', async () => {
-      await slidingWindowOracle.update(token0.address, token1.address, overrides)
+      await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
       await mineBlock(provider, startTime + 3600)
-      const tx = await slidingWindowOracle.update(token0.address, token1.address, overrides)
+      const tx = await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
       const receipt = await tx.wait()
-      expect(receipt.gasUsed).to.eq('94542')
+      expect(receipt.gasUsed).to.eq('124850')
     }).retries(2) // gas test inconsistent
 
     it('second update in one timeslot does not overwrite', async () => {
-      await slidingWindowOracle.update(token0.address, token1.address, overrides)
+      await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
       const before = await slidingWindowOracle.pairObservations(pair.address, observationIndexOf(0))
       // first hour still
       await mineBlock(provider, startTime + 1800)
-      await slidingWindowOracle.update(token0.address, token1.address, overrides)
+      await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
       const after = await slidingWindowOracle.pairObservations(pair.address, observationIndexOf(1800))
       expect(observationIndexOf(1800)).to.eq(observationIndexOf(0))
       expect(before).to.deep.eq(after)
     })
 
     it('fails for invalid pair', async () => {
-      await expect(slidingWindowOracle.update(weth.address, token1.address)).to.be.reverted
+      await expect(slidingWindowOracle.update(weth.address, token1.address, wallet.address)).to.be.reverted
     })
   })
 
@@ -189,14 +199,17 @@ describe('ExampleSlidingWindowOracle', () => {
 
     beforeEach(
       'deploy oracle',
-      async () => (slidingWindowOracle = await deployOracle(defaultWindowSize, defaultGranularity))
+      async () => {
+        slidingWindowOracle = await deployOracle(defaultWindowSize, defaultGranularity)
+        await uno.updateMinable(slidingWindowOracle.address, true)
+      }
     )
 
     // must come after setting time to 0 for correct cumulative price computations in the pair
     beforeEach('add default liquidity', () => addLiquidity())
 
     it('fails if previous bucket not set', async () => {
-      await slidingWindowOracle.update(token0.address, token1.address, overrides)
+      await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
       await expect(slidingWindowOracle.consult(token0.address, 0, token1.address)).to.be.revertedWith(
         'SlidingWindowOracle: MISSING_HISTORICAL_OBSERVATION'
       )
@@ -213,10 +226,10 @@ describe('ExampleSlidingWindowOracle', () => {
       beforeEach('add some prices', async () => {
         previousBlockTimestamp = (await pair.getReserves())[2]
         previousCumulativePrices = [await pair.price0CumulativeLast(), await pair.price1CumulativeLast()]
-        await slidingWindowOracle.update(token0.address, token1.address, overrides)
+        await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
         blockTimestamp = previousBlockTimestamp + 23 * 3600
         await mineBlock(provider, blockTimestamp)
-        await slidingWindowOracle.update(token0.address, token1.address, overrides)
+        await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
       })
 
       it('has cumulative price in previous bucket', async () => {
@@ -246,11 +259,11 @@ describe('ExampleSlidingWindowOracle', () => {
       const hour = 3600
       beforeEach('add some prices', async () => {
         // starting price of 1:2, or token0 = 2token1, token1 = 0.5token0
-        await slidingWindowOracle.update(token0.address, token1.address, overrides) // hour 0, 1:2
+        await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides) // hour 0, 1:2
         // change the price at hour 3 to 1:1 and immediately update
         await mineBlock(provider, startTime + 3 * hour)
         await addLiquidity(defaultToken0Amount, bigNumberify(0))
-        await slidingWindowOracle.update(token0.address, token1.address, overrides)
+        await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
 
         // change the ratios at hour 6:00 to 2:1, don't update right away
         await mineBlock(provider, startTime + 6 * hour)
@@ -259,7 +272,7 @@ describe('ExampleSlidingWindowOracle', () => {
 
         // update at hour 9:00 (price has been 2:1 for 3 hours, invokes counterfactual)
         await mineBlock(provider, startTime + 9 * hour)
-        await slidingWindowOracle.update(token0.address, token1.address, overrides)
+        await slidingWindowOracle.update(token0.address, token1.address, wallet.address, overrides)
         // move to hour 23:00 so we can check prices
         await mineBlock(provider, startTime + 23 * hour)
       })

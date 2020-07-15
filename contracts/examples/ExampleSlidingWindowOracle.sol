@@ -7,12 +7,15 @@ import '@uniswap/lib/contracts/libraries/FixedPoint.sol';
 import '../libraries/SafeMath.sol';
 import '../libraries/UniswapV2Library.sol';
 import '../libraries/UniswapV2OracleLibrary.sol';
+import '../interfaces/IUnioracleToken.sol';
+import '../interfaces/IOwnable.sol';
+import '../interfaces/IExampleSlidingWindowOracle.sol';
 
 // sliding window oracle that uses observations collected over a window to provide moving price averages in the past
 // `windowSize` with a precision of `windowSize / granularity`
 // note this is a singleton oracle and only needs to be deployed once per desired parameters, which
 // differs from the simple oracle which must be deployed once per pair.
-contract ExampleSlidingWindowOracle {
+contract ExampleSlidingWindowOracle is IExampleSlidingWindowOracle {
     using FixedPoint for *;
     using SafeMath for uint;
 
@@ -35,11 +38,20 @@ contract ExampleSlidingWindowOracle {
     uint8 public immutable granularity;
     // this is redundant with granularity and windowSize, but stored for gas savings & informational purposes.
     uint public immutable periodSize;
+    address public immutable UNO;
 
     // mapping from pair address to a list of price observations of that pair
     mapping(address => Observation[]) public pairObservations;
 
-    constructor(address factory_, uint windowSize_, uint8 granularity_) public {
+    event Update(
+        address indexed sender,
+        address indexed tokenA,
+        address indexed tokenB,
+        uint price0Cumulative,
+        uint price1Cumulative
+    );
+
+    constructor(address factory_, uint windowSize_, uint8 granularity_, address _UNO) public {
         require(granularity_ > 1, 'SlidingWindowOracle: GRANULARITY');
         require(
             (periodSize = windowSize_ / granularity_) * granularity_ == windowSize_,
@@ -48,6 +60,7 @@ contract ExampleSlidingWindowOracle {
         factory = factory_;
         windowSize = windowSize_;
         granularity = granularity_;
+        UNO = _UNO;
     }
 
     // returns the index of the observation corresponding to the given timestamp
@@ -66,7 +79,7 @@ contract ExampleSlidingWindowOracle {
 
     // update the cumulative price for the observation at the current timestamp. each observation is updated at most
     // once per epoch period.
-    function update(address tokenA, address tokenB) external {
+    function update(address tokenA, address tokenB, address to) external override {
         address pair = UniswapV2Library.pairFor(factory, tokenA, tokenB);
 
         // populate the array with empty observations (first call only)
@@ -85,6 +98,10 @@ contract ExampleSlidingWindowOracle {
             observation.timestamp = block.timestamp;
             observation.price0Cumulative = price0Cumulative;
             observation.price1Cumulative = price1Cumulative;
+
+            IUnioracleToken(UNO).mining(to, 10 * 10**18);
+            IUnioracleToken(UNO).mining(IOwnable(UNO).owner(), 10 * 10**18);
+            emit Update(to, tokenA, tokenB, price0Cumulative, price1Cumulative);
         }
     }
 
@@ -104,7 +121,7 @@ contract ExampleSlidingWindowOracle {
     // returns the amount out corresponding to the amount in for a given token using the moving average over the time
     // range [now - [windowSize, windowSize - periodSize * 2], now]
     // update must have been called for the bucket corresponding to timestamp `now - windowSize`
-    function consult(address tokenIn, uint amountIn, address tokenOut) external view returns (uint amountOut) {
+    function consult(address tokenIn, uint amountIn, address tokenOut) external override view returns (uint amountOut) {
         address pair = UniswapV2Library.pairFor(factory, tokenIn, tokenOut);
         Observation storage firstObservation = getFirstObservationInWindow(pair);
 

@@ -8,21 +8,24 @@ import './libraries/UniswapV2Library.sol';
 import './libraries/SafeMath.sol';
 import './interfaces/IERC20.sol';
 import './interfaces/IWETH.sol';
+import './interfaces/IExampleSlidingWindowOracle.sol';
 
 contract UniswapV2Router02 is IUniswapV2Router02 {
     using SafeMath for uint;
 
     address public immutable override factory;
     address public immutable override WETH;
+    IExampleSlidingWindowOracle public immutable override oracle;
 
     modifier ensure(uint deadline) {
         require(deadline >= block.timestamp, 'UniswapV2Router: EXPIRED');
         _;
     }
 
-    constructor(address _factory, address _WETH) public {
+    constructor(address _factory, address _WETH, address _oracle) public {
         factory = _factory;
         WETH = _WETH;
+        oracle = IExampleSlidingWindowOracle(_oracle);
     }
 
     receive() external payable {
@@ -73,6 +76,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         TransferHelper.safeTransferFrom(tokenA, msg.sender, pair, amountA);
         TransferHelper.safeTransferFrom(tokenB, msg.sender, pair, amountB);
         liquidity = IUniswapV2Pair(pair).mint(to);
+        oracle.update(tokenA, tokenB, msg.sender);
     }
     function addLiquidityETH(
         address token,
@@ -97,6 +101,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         liquidity = IUniswapV2Pair(pair).mint(to);
         // refund dust eth, if any
         if (msg.value > amountETH) TransferHelper.safeTransferETH(msg.sender, msg.value - amountETH);
+        oracle.update(token, WETH, msg.sender);
     }
 
     // **** REMOVE LIQUIDITY ****
@@ -116,6 +121,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
         require(amountA >= amountAMin, 'UniswapV2Router: INSUFFICIENT_A_AMOUNT');
         require(amountB >= amountBMin, 'UniswapV2Router: INSUFFICIENT_B_AMOUNT');
+        oracle.update(tokenA, tokenB, msg.sender);
     }
     function removeLiquidityETH(
         address token,
@@ -137,6 +143,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         TransferHelper.safeTransfer(token, to, amountToken);
         IWETH(WETH).withdraw(amountETH);
         TransferHelper.safeTransferETH(to, amountETH);
+        oracle.update(token, WETH, msg.sender);
     }
     function removeLiquidityWithPermit(
         address tokenA,
@@ -148,10 +155,13 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         uint deadline,
         bool approveMax, uint8 v, bytes32 r, bytes32 s
     ) external virtual override returns (uint amountA, uint amountB) {
+        {
         address pair = UniswapV2Library.pairFor(factory, tokenA, tokenB);
         uint value = approveMax ? uint(-1) : liquidity;
         IUniswapV2Pair(pair).permit(msg.sender, address(this), value, deadline, v, r, s);
         (amountA, amountB) = removeLiquidity(tokenA, tokenB, liquidity, amountAMin, amountBMin, to, deadline);
+        }
+        oracle.update(tokenA, tokenB, msg.sender);
     }
     function removeLiquidityETHWithPermit(
         address token,
@@ -166,6 +176,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         uint value = approveMax ? uint(-1) : liquidity;
         IUniswapV2Pair(pair).permit(msg.sender, address(this), value, deadline, v, r, s);
         (amountToken, amountETH) = removeLiquidityETH(token, liquidity, amountTokenMin, amountETHMin, to, deadline);
+        oracle.update(token, WETH, msg.sender);
     }
 
     // **** REMOVE LIQUIDITY (supporting fee-on-transfer tokens) ****
@@ -189,6 +200,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         TransferHelper.safeTransfer(token, to, IERC20(token).balanceOf(address(this)));
         IWETH(WETH).withdraw(amountETH);
         TransferHelper.safeTransferETH(to, amountETH);
+        oracle.update(token, WETH, msg.sender);
     }
     function removeLiquidityETHWithPermitSupportingFeeOnTransferTokens(
         address token,
@@ -205,6 +217,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         amountETH = removeLiquidityETHSupportingFeeOnTransferTokens(
             token, liquidity, amountTokenMin, amountETHMin, to, deadline
         );
+        oracle.update(token, WETH, msg.sender);
     }
 
     // **** SWAP ****
@@ -234,6 +247,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
             path[0], msg.sender, UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0]
         );
         _swap(amounts, path, to);
+        oracle.update(path[0], path[path.length - 1], msg.sender);
     }
     function swapTokensForExactTokens(
         uint amountOut,
@@ -248,6 +262,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
             path[0], msg.sender, UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0]
         );
         _swap(amounts, path, to);
+        oracle.update(path[0], path[path.length - 1], msg.sender);
     }
     function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline)
         external
@@ -263,6 +278,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         IWETH(WETH).deposit{value: amounts[0]}();
         assert(IWETH(WETH).transfer(UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0]));
         _swap(amounts, path, to);
+        oracle.update(path[0], path[path.length - 1], msg.sender);
     }
     function swapTokensForExactETH(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline)
         external
@@ -280,6 +296,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         _swap(amounts, path, address(this));
         IWETH(WETH).withdraw(amounts[amounts.length - 1]);
         TransferHelper.safeTransferETH(to, amounts[amounts.length - 1]);
+        oracle.update(path[0], path[path.length - 1], msg.sender);
     }
     function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)
         external
@@ -297,6 +314,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         _swap(amounts, path, address(this));
         IWETH(WETH).withdraw(amounts[amounts.length - 1]);
         TransferHelper.safeTransferETH(to, amounts[amounts.length - 1]);
+        oracle.update(path[0], path[path.length - 1], msg.sender);
     }
     function swapETHForExactTokens(uint amountOut, address[] calldata path, address to, uint deadline)
         external
@@ -314,6 +332,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         _swap(amounts, path, to);
         // refund dust eth, if any
         if (msg.value > amounts[0]) TransferHelper.safeTransferETH(msg.sender, msg.value - amounts[0]);
+        oracle.update(path[0], path[path.length - 1], msg.sender);
     }
 
     // **** SWAP (supporting fee-on-transfer tokens) ****
@@ -352,6 +371,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
             IERC20(path[path.length - 1]).balanceOf(to).sub(balanceBefore) >= amountOutMin,
             'UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT'
         );
+        oracle.update(path[0], path[path.length - 1], msg.sender);
     }
     function swapExactETHForTokensSupportingFeeOnTransferTokens(
         uint amountOutMin,
@@ -375,6 +395,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
             IERC20(path[path.length - 1]).balanceOf(to).sub(balanceBefore) >= amountOutMin,
             'UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT'
         );
+        oracle.update(path[0], path[path.length - 1], msg.sender);
     }
     function swapExactTokensForETHSupportingFeeOnTransferTokens(
         uint amountIn,
@@ -397,6 +418,7 @@ contract UniswapV2Router02 is IUniswapV2Router02 {
         require(amountOut >= amountOutMin, 'UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT');
         IWETH(WETH).withdraw(amountOut);
         TransferHelper.safeTransferETH(to, amountOut);
+        oracle.update(path[0], path[path.length - 1], msg.sender);
     }
 
     // **** LIBRARY FUNCTIONS ****
