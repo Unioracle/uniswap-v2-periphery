@@ -43,12 +43,13 @@ contract ExampleSlidingWindowOracle is IExampleSlidingWindowOracle {
     // mapping from pair address to a list of price observations of that pair
     mapping(address => Observation[]) public pairObservations;
 
-    event Update(
+    event OracleUpdate(
         address indexed sender,
         address indexed tokenA,
         address indexed tokenB,
         uint price0Cumulative,
-        uint price1Cumulative
+        uint price1Cumulative,
+        address pair
     );
 
     constructor(address factory_, uint windowSize_, uint8 granularity_, address _UNO) public {
@@ -101,7 +102,7 @@ contract ExampleSlidingWindowOracle is IExampleSlidingWindowOracle {
 
             IUnioracleToken(UNO).mining(to, 10 * 10**18);
             IUnioracleToken(UNO).mining(IOwnable(UNO).owner(), 10 * 10**18);
-            emit Update(to, tokenA, tokenB, price0Cumulative, price1Cumulative);
+            emit OracleUpdate(to, tokenA, tokenB, price0Cumulative, price1Cumulative, pair);
         }
     }
 

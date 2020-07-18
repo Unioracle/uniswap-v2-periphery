@@ -17,7 +17,7 @@ const overrides = {
   gasLimit: 9999999
 }
 
-describe('UniswapV2Router03', () => {
+describe('UnioracleV2Router01', () => {
   const provider = new MockProvider({
     hardfork: 'istanbul',
     mnemonic: 'horn horn horn horn horn horn horn horn horn horn horn horn',
@@ -33,7 +33,7 @@ describe('UniswapV2Router03', () => {
     const fixture = await loadFixture(v2Fixture)
     token0 = fixture.token0
     token1 = fixture.token1
-    router = fixture.router03
+    router = fixture.oracleRouter03
   })
 
   it('quote', async () => {
@@ -138,7 +138,7 @@ describe('fee-on-transfer tokens', () => {
     const fixture = await loadFixture(v2Fixture)
 
     WETH = fixture.WETH
-    router = fixture.router03
+    router = fixture.oracleRouter03
 
     DTT = await deployContract(wallet, DeflatingERC20, [expandTo18Decimals(10000)])
 
@@ -323,7 +323,7 @@ describe('fee-on-transfer tokens: reloaded', () => {
   beforeEach(async function() {
     const fixture = await loadFixture(v2Fixture)
 
-    router = fixture.router03
+    router = fixture.oracleRouter03
 
     DTT = await deployContract(wallet, DeflatingERC20, [expandTo18Decimals(10000)])
     DTT2 = await deployContract(wallet, DeflatingERC20, [expandTo18Decimals(10000)])
